@@ -21,8 +21,12 @@ export const changeRoleToOwner = async (req, res) => {
 export const addCar = async (req, res) => {
     try {
         const { _id } = req.user;
-        let car = JSON.parse(Request.body.carData);
+        let car = JSON.parse(req.body.carData);
         const imageFile = req.file;
+
+        if (!imageFile) {
+            return res.json({ success: false, message: "Image is required" });
+        }
 
         //upload image to imagekit
         const fileBuffer = fs.readFileSync(imageFile.path)
@@ -31,6 +35,13 @@ export const addCar = async (req, res) => {
             fileName: imageFile.originalname,
             folder: '/cars'
         })
+
+        // Delete temporary file
+        try {
+            fs.unlinkSync(imageFile.path);
+        } catch (unlinkError) {
+            console.log("Error deleting temp file:", unlinkError);
+        }
 
         // Optimization through imagekit URL transformation
         var optimizedimageURL = imagekit.url({
@@ -43,7 +54,7 @@ export const addCar = async (req, res) => {
         });
 
         const image = optimizedimageURL;
-        await Car.create({...car, owner: _id, image})
+        await Car.create({...car, owner: _id, image, isAvaliable: true})
 
         res.json({success: true, message: "Car Added"})
 
@@ -70,7 +81,7 @@ export const toggleCarAvailability = async (req, res)=>{
     try {
        const { _id } = req.user; 
        const {carId} = req.body
-       const car = await Car.findById({carId})
+       const car = await Car.findById(carId)
 
        //checking the cards belong to the user 
        if(car.owner.toString() !== _id.toString()){
@@ -93,7 +104,7 @@ export const deleteCar = async (req, res)=>{
     try {
        const { _id } = req.user; 
        const {carId} = req.body
-       const car = await Car.findById({carId})
+       const car = await Car.findById(carId)
 
        //checking the cards belong to the user 
        if(car.owner.toString() !== _id.toString()){
@@ -154,6 +165,10 @@ export const updateUserImage = async (req, res)=>{
         const { _id } = req.user;
         const imageFile = req.file;
 
+        if (!imageFile) {
+            return res.json({ success: false, message: "Image is required" });
+        }
+
         //Upload Image to ImageKit
         const fileBuffer = fs.readFileSync(imageFile.path)
         const response = await imagekit.upload({
@@ -161,6 +176,13 @@ export const updateUserImage = async (req, res)=>{
             fileName: imageFile.originalname,
             folder: '/users'
         })
+
+        // Delete temporary file
+        try {
+            fs.unlinkSync(imageFile.path);
+        } catch (unlinkError) {
+            console.log("Error deleting temp file:", unlinkError);
+        }
 
         //optimization through imageKit URL transformation
         var optimizedimageURL = imagekit.url({
