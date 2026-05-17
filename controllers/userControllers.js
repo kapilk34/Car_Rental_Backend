@@ -77,3 +77,42 @@ export const getCars = async (req, res)=>{
         
     }
 }
+
+// Google Auth User
+export const googleAuth = async (req, res) => {
+    try {
+        const { email, name, image } = req.body;
+        
+        if (!email || !name) {
+            return res.json({ success: false, message: "Email and name are required from Google Auth" });
+        }
+
+        // Check if user already exists
+        let user = await User.findOne({ email });
+
+        if (user) {
+            // User exists, just log them in
+            const token = generateToken(user._id.toString());
+            return res.json({ success: true, token, message: "Logged in successfully with Google" });
+        } else {
+            // User does not exist, create a new one
+            // Generate a secure random password since they won't use it to login
+            const randomPassword = Math.random().toString(36).slice(-10) + Math.random().toString(36).slice(-10);
+            const hashedPassword = await bcrypt.hash(randomPassword, 10);
+
+            user = await User.create({ 
+                name, 
+                email, 
+                password: hashedPassword,
+                image: image || '' 
+            });
+
+            const token = generateToken(user._id.toString());
+            return res.json({ success: true, token, message: "Account created successfully with Google" });
+        }
+
+    } catch (error) {
+        console.log(error.message);
+        res.json({ success: false, message: error.message });
+    }
+}

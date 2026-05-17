@@ -7,6 +7,7 @@ const checkAvailability = async (carId, pickupDate, returnDate) => {
         car: carId,
         pickupDate: { $lte: new Date(returnDate) },
         returnDate: { $gte: new Date(pickupDate) },
+        status: { $ne: "cancelled" }
     });
     return bookings.length === 0;
 };
@@ -20,7 +21,7 @@ export const checkAvailabilityOfCar = async (req, res) => {
             return res.json({ success: false, message: "Missing required fields." });
         }
 
-        const cars = await Cars.find({ location, isAvailable: true });
+        const cars = await Cars.find({ location, isAvaliable: true }); // spelling is isAvaliable in schema
 
         const availableCarsPromises = cars.map(async (car) => {
             const isAvailable = await checkAvailability(car._id, pickupDate, returnDate);
@@ -57,7 +58,8 @@ export const createBooking = async (req, res) => {
         const startDate = new Date(pickupDate);
         const endDate = new Date(returnDate);
 
-        const noOfDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+        let noOfDays = Math.ceil((endDate - startDate) / (1000 * 60 * 60 * 24));
+        if (noOfDays === 0) noOfDays = 1; // if booked for same day, charge for 1 day
         const price = carData.pricePerDay * noOfDays;
 
         await Booking.create({
