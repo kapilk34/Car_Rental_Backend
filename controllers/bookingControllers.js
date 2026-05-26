@@ -62,7 +62,7 @@ export const createBooking = async (req, res) => {
         if (noOfDays === 0) noOfDays = 1; // if booked for same day, charge for 1 day
         const price = carData.pricePerDay * noOfDays;
 
-        await Booking.create({
+        const newBooking = await Booking.create({
             car,
             owner: carData.owner,
             user: _id,
@@ -71,7 +71,36 @@ export const createBooking = async (req, res) => {
             price
         });
 
-        res.json({ success: true, message: "Booking Created Successfully" });
+        // Emit socket event for real-time notification
+        const io = req.app.get('io');
+        if (io) {
+            const populatedBooking = await Booking.findById(newBooking._id)
+                .populate("car", "model pricePerDay")
+                .populate("user", "name email phone")
+                .populate("owner", "name email");
+
+            // Notify admin/owners
+            io.to("owner").emit("newBooking", {
+                bookingId: populatedBooking._id,
+                car: populatedBooking.car,
+                user: populatedBooking.user,
+                owner: populatedBooking.owner,
+                pickupDate: populatedBooking.pickupDate,
+                returnDate: populatedBooking.returnDate,
+                price: populatedBooking.price,
+                status: populatedBooking.status,
+                createdAt: populatedBooking.createdAt
+            });
+
+            // Notify user
+            io.to(_id.toString()).emit("bookingCreated", {
+                bookingId: populatedBooking._id,
+                status: "pending",
+                message: "Your booking has been created and is pending approval"
+            });
+        }
+
+        res.json({ success: true, message: "Booking Created Successfully", bookingId: newBooking._id });
 
     } catch (error) {
         console.error(error.message);
@@ -117,7 +146,7 @@ export const changeBookingsStatus = async (req, res) => {
         const { _id } = req.user;
         const { bookingId, status } = req.body;
 
-        const booking = await Booking.findById(bookingId);
+        const booking = await Booking.findById(bookingId).populate("user", "name email");
         if (!booking) {
             return res.json({ success: false, message: "Booking not found" });
         }
@@ -128,6 +157,25 @@ export const changeBookingsStatus = async (req, res) => {
 
         booking.status = status;
         await booking.save();
+
+        // Emit socket event for real-time notification
+        const io = req.app.get('io');
+        if (io) {
+            // Notify user about booking status update
+            io.to(booking.user._id.toString()).emit("bookingStatusUpdated", {
+                bookingId: booking._id,
+                status: status,
+                message: `Your booking has been ${status}`,
+                timestamp: new Date()
+            });
+
+            // Broadcast to all owners for dashboard update
+            io.to("owner").emit("bookingStatusChanged", {
+                bookingId: booking._id,
+                status: status,
+                updatedAt: booking.updatedAt
+            });
+        }
 
         res.json({ success: true, message: "Booking status updated successfully" });
 
