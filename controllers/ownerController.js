@@ -99,6 +99,41 @@ export const toggleCarAvailability = async (req, res)=>{
 }
 
 
+// API to update car details and/or image
+export const updateCar = async (req, res) => {
+    try {
+        const { _id } = req.user;
+        const { carId, carData } = req.body;
+        const car = await Car.findById(carId);
+
+        if (!car) return res.json({ success: false, message: "Car not found" });
+        if (car.owner.toString() !== _id.toString())
+            return res.json({ success: false, message: "Unauthorized" });
+
+        const updates = carData ? JSON.parse(carData) : {};
+
+        if (req.file) {
+            const fileBuffer = fs.readFileSync(req.file.path);
+            const response = await imagekit.upload({
+                file: fileBuffer,
+                fileName: req.file.originalname,
+                folder: '/cars'
+            });
+            try { fs.unlinkSync(req.file.path); } catch (e) { console.log(e); }
+            updates.image = imagekit.url({
+                path: response.filePath,
+                transformation: [{ width: '1280' }, { quality: 'auto' }, { format: 'webp' }]
+            });
+        }
+
+        await Car.findByIdAndUpdate(carId, updates);
+        res.json({ success: true, message: "Car updated successfully" });
+    } catch (error) {
+        console.log(error.message);
+        res.json({ success: false, message: error.message });
+    }
+}
+
 //API to delete a car
 export const deleteCar = async (req, res)=>{
     try {
