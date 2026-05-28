@@ -18,7 +18,7 @@
     "@langchain/openai": "^1.4.7",
     "bcrypt": "^6.0.0",
     "cors": "^2.8.5",
-    "dotenv": "^17.2.0",
+    "dotenv": "^17.4.2",
     "express": "^5.1.0",
     "firebase-admin": "^13.9.0",
     "imagekit": "^6.0.0",
@@ -28,7 +28,8 @@
     "mongoose": "^8.16.4",
     "multer": "^2.0.2",
     "socket.io": "^4.8.3",
-    "socket.io-client": "^4.8.3"
+    "socket.io-client": "^4.8.3",
+    "stripe": "^22.2.0"
   },
   "devDependencies": {
     "nodemon": "^3.1.10"

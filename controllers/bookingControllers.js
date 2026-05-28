@@ -1,13 +1,17 @@
 import Booking from "../models/booking.js";
 import Cars from "../models/car.js";
+import Stripe from "stripe";
+
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 
 // Function to check availability of a car for a given date range
+// Only checks for CONFIRMED bookings (not pending/unpaid bookings)
 const checkAvailability = async (carId, pickupDate, returnDate) => {
     const bookings = await Booking.find({
         car: carId,
         pickupDate: { $lte: new Date(returnDate) },
         returnDate: { $gte: new Date(pickupDate) },
-        status: { $ne: "cancelled" }
+        status: { $in: ["confirmed", "completed"] } // Only confirmed/completed bookings block availability
     });
     return bookings.length === 0;
 };
@@ -39,7 +43,7 @@ export const checkAvailabilityOfCar = async (req, res) => {
     }
 };
 
-// API to create a booking
+// API to create a booking (initial booking with pending payment status)
 export const createBooking = async (req, res) => {
     try {
         const { _id } = req.user;
@@ -62,45 +66,153 @@ export const createBooking = async (req, res) => {
         if (noOfDays === 0) noOfDays = 1; // if booked for same day, charge for 1 day
         const price = carData.pricePerDay * noOfDays;
 
+        // Create booking with pending payment status
         const newBooking = await Booking.create({
             car,
             owner: carData.owner,
             user: _id,
             pickupDate,
             returnDate,
-            price
+            price,
+            status: "pending",
+            paymentStatus: "pending"
         });
 
-        // Emit socket event for real-time notification
+        res.json({ 
+            success: true, 
+            message: "Booking created. Proceed to payment", 
+            bookingId: newBooking._id,
+            amount: price
+        });
+
+    } catch (error) {
+        console.error(error.message);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// API to create Stripe payment intent
+export const createPaymentIntent = async (req, res) => {
+    try {
+        const { bookingId } = req.body;
+        const { _id: userId } = req.user;
+
+        if (!bookingId) {
+            return res.json({ success: false, message: "Booking ID is required" });
+        }
+
+        // Find the booking
+        const booking = await Booking.findById(bookingId).populate("car user");
+        
+        if (!booking) {
+            return res.json({ success: false, message: "Booking not found" });
+        }
+
+        if (booking.user._id.toString() !== userId.toString()) {
+            return res.json({ success: false, message: "Unauthorized access" });
+        }
+
+        if (booking.paymentStatus === "completed") {
+            return res.json({ success: false, message: "Payment already completed for this booking" });
+        }
+
+        // Create a payment intent in Stripe
+        const paymentIntent = await stripe.paymentIntents.create({
+            amount: Math.round(booking.price * 100), // Amount in cents
+            currency: process.env.STRIPE_CURRENCY || "usd",
+            metadata: {
+                bookingId: bookingId,
+                userId: userId.toString(),
+                carId: booking.car._id.toString()
+            },
+            description: `Booking for ${booking.car.model} from ${booking.pickupDate} to ${booking.returnDate}`,
+            receipt_email: booking.user.email
+        });
+
+        // Update booking with payment intent ID
+        booking.stripePaymentIntentId = paymentIntent.id;
+        await booking.save();
+
+        res.json({
+            success: true,
+            clientSecret: paymentIntent.client_secret,
+            paymentIntentId: paymentIntent.id,
+            bookingId: bookingId,
+            amount: booking.price
+        });
+
+    } catch (error) {
+        console.error(error.message);
+        res.json({ success: false, message: error.message });
+    }
+};
+
+// API to confirm payment after successful Stripe payment
+export const confirmPayment = async (req, res) => {
+    try {
+        const { bookingId, paymentIntentId } = req.body;
+        const { _id: userId } = req.user;
+
+        if (!bookingId || !paymentIntentId) {
+            return res.json({ success: false, message: "Booking ID and Payment Intent ID are required" });
+        }
+
+        // Find the booking
+        const booking = await Booking.findById(bookingId).populate("car", "model pricePerDay").populate("user", "name email phone").populate("owner", "name email");
+        
+        if (!booking) {
+            return res.json({ success: false, message: "Booking not found" });
+        }
+
+        if (booking.user._id.toString() !== userId.toString()) {
+            return res.json({ success: false, message: "Unauthorized access" });
+        }
+
+        // Verify payment intent with Stripe
+        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+
+        if (paymentIntent.status !== "succeeded") {
+            return res.json({ success: false, message: "Payment was not successful" });
+        }
+
+        // Update booking status
+        booking.paymentStatus = "completed";
+        booking.status = "confirmed";
+        booking.stripePaymentIntentId = paymentIntentId;
+        await booking.save();
+
+        // Emit socket events
         const io = req.app.get('io');
         if (io) {
-            const populatedBooking = await Booking.findById(newBooking._id)
-                .populate("car", "model pricePerDay")
-                .populate("user", "name email phone")
-                .populate("owner", "name email");
-
-            // Notify admin/owners
+            // Notify admin/owners about confirmed booking
             io.to("owner").emit("newBooking", {
-                bookingId: populatedBooking._id,
-                car: populatedBooking.car,
-                user: populatedBooking.user,
-                owner: populatedBooking.owner,
-                pickupDate: populatedBooking.pickupDate,
-                returnDate: populatedBooking.returnDate,
-                price: populatedBooking.price,
-                status: populatedBooking.status,
-                createdAt: populatedBooking.createdAt
+                bookingId: booking._id,
+                car: booking.car,
+                user: booking.user,
+                owner: booking.owner,
+                pickupDate: booking.pickupDate,
+                returnDate: booking.returnDate,
+                price: booking.price,
+                status: booking.status,
+                paymentStatus: booking.paymentStatus,
+                createdAt: booking.createdAt
             });
 
-            // Notify user
-            io.to(_id.toString()).emit("bookingCreated", {
-                bookingId: populatedBooking._id,
-                status: "pending",
-                message: "Your booking has been created and is pending approval"
+            // Notify user about successful booking
+            io.to(userId.toString()).emit("bookingConfirmed", {
+                bookingId: booking._id,
+                status: "confirmed",
+                paymentStatus: "completed",
+                message: "Your payment was successful and booking is confirmed!"
             });
         }
 
-        res.json({ success: true, message: "Booking Created Successfully", bookingId: newBooking._id });
+        res.json({ 
+            success: true, 
+            message: "Payment confirmed and booking confirmed successfully", 
+            bookingId: booking._id,
+            booking: booking
+        });
 
     } catch (error) {
         console.error(error.message);

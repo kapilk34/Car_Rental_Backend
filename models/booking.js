@@ -33,6 +33,19 @@ const bookingSchema = new mongoose.Schema({
     price: {
         type: Number,
         required: true
+    },
+    paymentStatus: {
+        type: String,
+        enum: ["pending", "completed", "failed"],
+        default: "pending"
+    },
+    stripePaymentIntentId: {
+        type: String,
+        default: null
+    },
+    stripeSessionId: {
+        type: String,
+        default: null
     }
 }, { timestamps: true });
 
