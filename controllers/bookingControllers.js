@@ -2,7 +2,21 @@ import Booking from "../models/booking.js";
 import Cars from "../models/car.js";
 import Stripe from "stripe";
 
-const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+let stripe;
+
+const getStripe = () => {
+    const secretKey = process.env.STRIPE_SECRET_KEY;
+
+    if (!secretKey || !secretKey.startsWith("sk_")) {
+        throw new Error("Stripe secret key is missing or invalid. Set Backend/.env STRIPE_SECRET_KEY to your sk_test_... or sk_live_... key.");
+    }
+
+    if (!stripe) {
+        stripe = new Stripe(secretKey);
+    }
+
+    return stripe;
+};
 
 // Function to check availability of a car for a given date range
 // Only checks for CONFIRMED bookings (not pending/unpaid bookings)
@@ -117,7 +131,7 @@ export const createPaymentIntent = async (req, res) => {
         }
 
         // Create a payment intent in Stripe
-        const paymentIntent = await stripe.paymentIntents.create({
+        const paymentIntent = await getStripe().paymentIntents.create({
             amount: Math.round(booking.price * 100), // Amount in cents
             currency: process.env.STRIPE_CURRENCY || "usd",
             metadata: {
@@ -148,13 +162,14 @@ export const createPaymentIntent = async (req, res) => {
 };
 
 // API to confirm payment after successful Stripe payment
+// NOTE: Booking status stays "pending" until admin confirms it
 export const confirmPayment = async (req, res) => {
     try {
-        const { bookingId, paymentIntentId } = req.body;
+        const { bookingId, paymentIntentId, paymentType } = req.body;
         const { _id: userId } = req.user;
 
-        if (!bookingId || !paymentIntentId) {
-            return res.json({ success: false, message: "Booking ID and Payment Intent ID are required" });
+        if (!bookingId) {
+            return res.json({ success: false, message: "Booking ID is required" });
         }
 
         // Find the booking
@@ -168,48 +183,88 @@ export const confirmPayment = async (req, res) => {
             return res.json({ success: false, message: "Unauthorized access" });
         }
 
-        // Verify payment intent with Stripe
-        const paymentIntent = await stripe.paymentIntents.retrieve(paymentIntentId);
+        // Handle different payment types
+        if (paymentType === "now") {
+            // Paying now - require payment intent ID and verify with Stripe
+            if (!paymentIntentId) {
+                return res.json({ success: false, message: "Payment Intent ID is required for immediate payment" });
+            }
 
-        if (paymentIntent.status !== "succeeded") {
-            return res.json({ success: false, message: "Payment was not successful" });
+            const paymentIntent = await getStripe().paymentIntents.retrieve(paymentIntentId);
+            if (paymentIntent.status !== "succeeded") {
+                return res.json({ success: false, message: "Payment was not successful" });
+            }
+
+            // Update payment status to completed
+            booking.paymentStatus = "completed";
+            booking.stripePaymentIntentId = paymentIntentId;
+        } else if (paymentType === "at_pickup") {
+            // Paying at pickup - no Stripe verification needed
+            // Payment status stays "pending" - user will pay when picking up
+            booking.paymentStatus = "pending";
+        } else {
+            return res.json({ success: false, message: "Invalid payment type" });
         }
 
-        // Update booking status
-        booking.paymentStatus = "completed";
-        booking.status = "confirmed";
-        booking.stripePaymentIntentId = paymentIntentId;
+        // Update booking fields regardless of payment type
+        booking.paymentType = paymentType;
+        // Status remains "pending" - admin will confirm the booking
         await booking.save();
 
         // Emit socket events
         const io = req.app.get('io');
         if (io) {
-            // Notify admin/owners about confirmed booking
-            io.to("owner").emit("newBooking", {
-                bookingId: booking._id,
-                car: booking.car,
-                user: booking.user,
-                owner: booking.owner,
-                pickupDate: booking.pickupDate,
-                returnDate: booking.returnDate,
-                price: booking.price,
-                status: booking.status,
-                paymentStatus: booking.paymentStatus,
-                createdAt: booking.createdAt
-            });
+            if (paymentType === "now") {
+                // Notify admin/owners about new paid booking
+                io.to("owner").emit("paymentCompleted", {
+                    bookingId: booking._id,
+                    car: booking.car,
+                    user: booking.user,
+                    owner: booking.owner,
+                    pickupDate: booking.pickupDate,
+                    returnDate: booking.returnDate,
+                    price: booking.price,
+                    status: booking.status,
+                    paymentStatus: booking.paymentStatus,
+                    paymentType: booking.paymentType,
+                    message: `Payment received for booking. Awaiting admin confirmation.`,
+                    createdAt: booking.createdAt
+                });
+            } else if (paymentType === "at_pickup") {
+                // Notify admin/owners about new booking request (payment pending)
+                io.to("owner").emit("newBookingRequest", {
+                    bookingId: booking._id,
+                    car: booking.car,
+                    user: booking.user,
+                    owner: booking.owner,
+                    pickupDate: booking.pickupDate,
+                    returnDate: booking.returnDate,
+                    price: booking.price,
+                    status: booking.status,
+                    paymentStatus: booking.paymentStatus,
+                    paymentType: booking.paymentType,
+                    message: `New booking request. Payment will be collected at pickup.`,
+                    createdAt: booking.createdAt
+                });
+            }
 
-            // Notify user about successful booking
-            io.to(userId.toString()).emit("bookingConfirmed", {
+            // Notify user about successful booking request
+            io.to(userId.toString()).emit("paymentSuccessful", {
                 bookingId: booking._id,
-                status: "confirmed",
-                paymentStatus: "completed",
-                message: "Your payment was successful and booking is confirmed!"
+                status: "pending",
+                paymentStatus: booking.paymentStatus,
+                paymentType: booking.paymentType,
+                message: paymentType === "now" 
+                    ? "Your payment was successful! Your booking is pending admin confirmation."
+                    : "Your booking request has been sent! Payment will be collected at pickup."
             });
         }
 
         res.json({ 
             success: true, 
-            message: "Payment confirmed and booking confirmed successfully", 
+            message: paymentType === "now"
+                ? "Payment successful! Your booking is pending admin confirmation"
+                : "Booking request sent! You will pay when picking up the car",
             bookingId: booking._id,
             booking: booking
         });

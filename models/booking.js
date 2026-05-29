@@ -39,6 +39,11 @@ const bookingSchema = new mongoose.Schema({
         enum: ["pending", "completed", "failed"],
         default: "pending"
     },
+    paymentType: {
+        type: String,
+        enum: ["now", "at_pickup"],
+        default: "now"
+    },
     stripePaymentIntentId: {
         type: String,
         default: null
