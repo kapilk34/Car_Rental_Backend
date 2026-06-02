@@ -44,4 +44,7 @@ app.use('/api/bookings', bookingRouter)
 initializeSocketHandlers(io);
 
 const PORT = process.env.PORT || 5000;
-server.listen(PORT,()=> console.log(`Server running on the port ${PORT}`))
+
+server.listen(PORT,()=> {
+    console.log(`Server running on the port ${PORT}`)
+})
