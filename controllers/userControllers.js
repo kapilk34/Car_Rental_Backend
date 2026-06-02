@@ -54,7 +54,7 @@ export const loginUser = async (req, res) =>{
     }
 }
 
-//Get yser data using token(jwt)
+//Get your data using token(jwt)
 export const getUserData = async(req, res) =>{
     try{
         const {user} = req;
