@@ -6,7 +6,8 @@
   "scripts": {
     "server": "nodemon server.js",
     "start": "node server.js",
-    "dev": "nodemon server.js"
+    "dev": "nodemon server.js",
+    "build" : "npm run build"
   },
   "keywords": [],
   "author": "",
