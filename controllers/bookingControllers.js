@@ -39,7 +39,7 @@ export const checkAvailabilityOfCar = async (req, res) => {
             return res.json({ success: false, message: "Missing required fields." });
         }
 
-        const cars = await Cars.find({ location, isAvaliable: true }); // spelling is isAvaliable in schema
+        const cars = await Cars.find({ location, isAvaliable: true }); 
 
         const availableCarsPromises = cars.map(async (car) => {
             const isAvailable = await checkAvailability(car._id, pickupDate, returnDate);
@@ -162,7 +162,6 @@ export const createPaymentIntent = async (req, res) => {
 };
 
 // API to confirm payment after successful Stripe payment
-// NOTE: Booking status stays "pending" until admin confirms it
 export const confirmPayment = async (req, res) => {
     try {
         const { bookingId, paymentIntentId, paymentType } = req.body;
@@ -183,9 +182,7 @@ export const confirmPayment = async (req, res) => {
             return res.json({ success: false, message: "Unauthorized access" });
         }
 
-        // Handle different payment types
         if (paymentType === "now") {
-            // Paying now - require payment intent ID and verify with Stripe
             if (!paymentIntentId) {
                 return res.json({ success: false, message: "Payment Intent ID is required for immediate payment" });
             }
@@ -195,20 +192,15 @@ export const confirmPayment = async (req, res) => {
                 return res.json({ success: false, message: "Payment was not successful" });
             }
 
-            // Update payment status to completed
             booking.paymentStatus = "completed";
             booking.stripePaymentIntentId = paymentIntentId;
         } else if (paymentType === "at_pickup") {
-            // Paying at pickup - no Stripe verification needed
-            // Payment status stays "pending" - user will pay when picking up
             booking.paymentStatus = "pending";
         } else {
             return res.json({ success: false, message: "Invalid payment type" });
         }
 
-        // Update booking fields regardless of payment type
         booking.paymentType = paymentType;
-        // Status remains "pending" - admin will confirm the booking
         await booking.save();
 
         // Emit socket events
@@ -328,7 +320,6 @@ export const changeBookingsStatus = async (req, res) => {
         // Emit socket event for real-time notification
         const io = req.app.get('io');
         if (io) {
-            // Notify user about booking status update
             io.to(booking.user._id.toString()).emit("bookingStatusUpdated", {
                 bookingId: booking._id,
                 status: status,

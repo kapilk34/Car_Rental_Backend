@@ -17,7 +17,6 @@ export const changeRoleToOwner = async (req, res) => {
 }
 
 //API to list car
-
 export const addCar = async (req, res) => {
     try {
         const { _id } = req.user;
@@ -43,7 +42,6 @@ export const addCar = async (req, res) => {
             console.log("Error deleting temp file:", unlinkError);
         }
 
-        // Optimization through imagekit URL transformation
         var optimizedimageURL = imagekit.url({
             path: response.filePath,
             transformation: [
@@ -64,7 +62,7 @@ export const addCar = async (req, res) => {
     }
 }
 
-// API tO LIST oWNER CARS
+// API to list owner cars
 export const getOwnerCars = async (req, res)=>{
     try {
        const { _id } = req.user; 
