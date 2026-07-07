@@ -9,7 +9,6 @@ import ownerRouter from "./routes/ownerRoutes.js";
 import bookingRouter from "./routes/bookingRoutes.js";
 import { initializeSocketHandlers } from "./socket/bookingSocketHandlers.js";
 
-//Initialize Express App
 const app = express()
 const server = http.createServer(app);
 
@@ -22,7 +21,6 @@ const io = new Server(server, {
     }
 });
 
-//Connecting Database
 await connectDB()
 
 //Middleware
@@ -40,7 +38,6 @@ app.use('/api/user', userRouter )
 app.use('/api/owner', ownerRouter)
 app.use('/api/bookings', bookingRouter)
 
-//Initialize Socket Handlers
 initializeSocketHandlers(io);
 
 const PORT = process.env.PORT || 5000;
