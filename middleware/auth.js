@@ -8,7 +8,6 @@ export const protect = async (req, res, next)=>{
         return res.json({success:false, message: "not authorized"})
     }
 
-    // Extract token from "Bearer <token>" format if present
     if(token.startsWith('Bearer ')){
         token = token.slice(7);
     }
